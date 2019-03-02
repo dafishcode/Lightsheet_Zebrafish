@@ -81,7 +81,7 @@ def meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False):
     return mimg, imglist
 
 #===============================================================================
-def fishplot(img, overl = '', orient = 'axial', sliceno = 20, al = .5):
+def fishplot(img, overl = '', orient = 'axial', sliceno = 20, al = .5, col = 'magma'):
 #===============================================================================
     # N.B This breaks frequently - I have no idea what is wrong with the implementation
     
@@ -90,14 +90,21 @@ def fishplot(img, overl = '', orient = 'axial', sliceno = 20, al = .5):
     r = img.shape
     
     if   orient == 'coronal':     axs = 0; ri = 0
-    elif orient == 'sagittal':    axs = 1; ri = 2
+    elif orient == 'sagittal':    axs = 1; ri = 1
     elif orient == 'axial':       axs = 2; ri = 2 
     
+    # ALERT ALERT I HAVE NO IDEA WHAT THE SLICE INDEXING WANTS FROM ME
+    # Does it live in the physical space?
+    # Does it live in the voxel space?
+    # I DON'T KNOW - so I'm fudging it
+    
     sliceno = min([sliceno,r[ri]])
-    sli     = list(map(int, np.ndarray.tolist(np.linspace(0, r[ri]*img.spacing[ri]-1, sliceno))))
-    print(r)  
+    
+    if orient == 'axial': mx_dim = r[ri] - 1
+    else: mx_dim = r[ri] * img.spacing[ri]-1
+    sli     = list(map(int, np.ndarray.tolist(np.linspace(0, mx_dim, sliceno))))
         
     if not overl: ants.plot(img, axis = axs, slices = sli, figsize = 6)
     
-    else: ants.plot(img, overl, overlay_cmap = 'magma', overlay_alpha= al, axis = axs, slices = sli, figsize = 6) 
+    else: ants.plot(img, overl, overlay_cmap = col, overlay_alpha= al, axis = axs, slices = sli, figsize = 6) 
         
