@@ -16,7 +16,7 @@ def cde_cell_fishspec(Fdata, prefx = ''):
         for c in cfld:
             Tpaths = []
             tifs = os.listdir(Fdata + os.sep + f + os.sep + c)
-            r    = re.compile('^[A-Z].*[tif|tiff|TIF|TIFF]$')
+            r    = re.compile('^[0-9A-Z].*[tif|tiff|TIF|TIFF]$')
             tifs = list(filter(r.match, tifs))
             Tpaths = []
             for t in tifs:
@@ -24,7 +24,7 @@ def cde_cell_fishspec(Fdata, prefx = ''):
             
             # If in single plane tifs, pull them together
             #-----------------------------------------------------------
-            if pull_planes:
+            if pull_planes == 1:
                 plid   = []
                 for t in tifs: plid.append(int(t[-6:-4]))
                     
@@ -41,8 +41,10 @@ def cde_cell_fishspec(Fdata, prefx = ''):
             Cond.append({'Name':c, 
                          'Path':Fdata + os.sep + f + os.sep + c, 
                          'Tifs':tifs,
-                         'Tpaths':Tpaths,
-                         'Plane':Planes})
+                         'Tpaths':Tpaths
+                        })
+            
+            if pull_planes == 1: Cond.update({'Plane':Planes})
             
         Zfish.append({'Cond':Cond, 'Name':f[len(prefx)-2:]})
     
@@ -53,6 +55,7 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
 #=======================================================================
 
     from skimage import io
+    from PIL import Image
     import os
     import numpy as np
 
@@ -80,8 +83,11 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
 
             # Get shape information on the zplanes
             #----------------------------------------------------------
-            ttif = io.imread(Fish["Cond"][c]["Tpaths"][0])
-            npln = ttif.shape[0]
+            ttif = Image.open(Fish["Cond"][c]["Tpaths"][0])
+            npln = ttif.n_frames
+            
+#             ttif = io.imread(Fish["Cond"][c]["Tpaths"][0])
+#             npln = ttif.shape[0]
 
             print('Condition ' + Fish["Cond"][c]["Name"])
             print('> There are ' + str(npln) + ' Planes')
@@ -97,11 +103,24 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
                 btch = list(range(0,len(tifs), mxpf))
                 if len(tifs) > btch[-1]: btch.append(len(tifs))            
                 for bi in range(len(btch)-1):
-                    pln = io.imread(tifs[0])[pl,:,:]
+                    
+                    # Load first plane to prime array
+                    #-------------------------------------------------
+#                     pln = io.imread(tifs[0])[pl,:,:]
+
+                    img = Image.open(tifs[0])
+                    img.seek(pl)
+                    pln = np.array(img)
+                    img.close()
+                
                     pln = pln.reshape(1, pln.shape[0], pln.shape[1])
                     for i in range(btch[bi],btch[bi+1]):
                         if i%1000 == 0: print('> > ' + str(i)) 
-                        ldd = io.imread(tifs[i])[pl,:,:]
+                        img = Image.open(tifs[0])
+                        img.seek(pl)
+                        ldd = np.array(img)
+                        img.close()
+#                         ldd = io.imread(tifs[i])[pl,:,:]
                         ldd = ldd.reshape(1, ldd.shape[0], ldd.shape[1])
                         pln = np.concatenate((pln, ldd), axis = 0)
 
@@ -115,5 +134,5 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
                             + '_PL' + ps.zfill(2) + '.tif')
                     print('> > > Saving interim file')
                         
-                    io.imsave(pth + fnm, pln)
-        
+                    io.imsave(pth + fnm, pln)   
+         

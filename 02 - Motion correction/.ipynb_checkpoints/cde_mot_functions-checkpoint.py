@@ -59,7 +59,7 @@ def cde_mot_makepath(Fish, prefix = '', verbose = False):
 #===============================================================================
 # Calculate mean image
 #===============================================================================
-def cde_mot_meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False):
+def cde_mot_meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False, plot = 'do'):
     import numpy as np
     import ants
     import os
@@ -102,8 +102,9 @@ def cde_mot_meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False):
         imglist.append(img)
 
     mimg = ants.from_numpy(mean_arr)
-    ants.plot(mimg, axis=2, slices = range(mimg.shape[2
-                                                     ]), figsize=3)
+    if plot == 'do':    
+        ants.plot(mimg, axis=2, slices = range(mimg.shape[2]), figsize=3)
+        
     return mimg, imglist
 
 #===============================================================================
@@ -148,7 +149,7 @@ def cde_mot_rigidreg(fixed, images, Fimg = '..', spacing = list([1.6,1.6,8]), cr
         else:
             mvd.append(moved["warpedmovout"])
             
-        if cnt/pct1 % 5 == 0:  
+        if cnt/pct1 % 5 == 0:   # < this doesn't work robustly 
             ts = time.time()
             st = datetime.datetime.fromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')
             print('Completed ' + str((cnt)/pct1) + '% at ' + st)
