@@ -13,6 +13,7 @@ def cde_cell_fishspec(Fdata, prefx = ''):
     for f in folds:
         cfld = next(os.walk(Fdata + os.sep + f))[1]
         Cond = []
+        ci   = 0
         for c in cfld:
             Tpaths = []
             tifs = os.listdir(Fdata + os.sep + f + os.sep + c)
@@ -44,7 +45,8 @@ def cde_cell_fishspec(Fdata, prefx = ''):
                          'Tpaths':Tpaths
                         })
             
-            if pull_planes == 1: Cond.update({'Plane':Planes})
+            if pull_planes == 1: Cond[ci].update({'Plane':Planes})
+            ci = ci + 1
             
         Zfish.append({'Cond':Cond, 'Name':f[len(prefx)-2:]})
     
@@ -58,6 +60,7 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
     from PIL import Image
     import os
     import numpy as np
+    import datetime
 
     # Make new folder for plane-divided data
     #--------------------------------------------------------------
@@ -115,8 +118,8 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
                 
                     pln = pln.reshape(1, pln.shape[0], pln.shape[1])
                     for i in range(btch[bi],btch[bi+1]):
-                        if i%1000 == 0: print('> > ' + str(i)) 
-                        img = Image.open(tifs[0])
+                        if i%500 == 0: print('> ', end = ' ') 
+                        img = Image.open(tifs[i])
                         img.seek(pl)
                         ldd = np.array(img)
                         img.close()
@@ -132,7 +135,8 @@ def cde_cell_planesave(Fdata, Fish, cname = 'all', mxpf = 7500):
                     fnm  = (Fish["Name"] + '_s' + bs.zfill(2) 
                             + '_' + Fish["Cond"][c]["Name"][0] 
                             + '_PL' + ps.zfill(2) + '.tif')
-                    print('> > > Saving interim file')
+                    currentDT = datetime.datetime.now()
+                    print(currentDT.strftime("%Y-%m-%d %H:%M:%S") + '| Saving interim file')
                         
                     io.imsave(pth + fnm, pln)   
          

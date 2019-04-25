@@ -40,9 +40,10 @@ def load(Fcmn): # Load imaging datasets from caiman output to custom object
             files.sort()
             testp = io.loadmat(Fcmn + os.sep + f + os.sep + c + os.sep + files[0])
 
-            pid = 0
-            xyz = np.empty((0,3))
-            dff = np.empty((0,testp["Temporal"].shape[1]))
+            pid    = 0
+            xyz    = np.empty((0,3))
+            pixco  = np.empty((0,3))
+            dff    = np.empty((0,testp["Temporal"].shape[1]))
             for p in files:
 
                 tp  = io.loadmat(Fcmn + os.sep + f + os.sep + c + os.sep + p)
@@ -52,6 +53,8 @@ def load(Fcmn): # Load imaging datasets from caiman output to custom object
                 for s in range(tp["Spatial"].shape[1]):
                     xy    = np.reshape(tp["Spatial"][:,s].toarray(), xy_size, order='C')
                     x,y   = np.where(xy)
+                    PIXCO = np.array([int(np.mean(x)), int(np.mean(y)), pid])
+                    pixco = np.vstack((pixco,PIXCO))
                     XYZ   = np.array([np.mean(x) * spacing[0], np.mean(y) * spacing[1], pid * spacing[2]])
                     xyz   = np.vstack((xyz, XYZ))
 
@@ -59,7 +62,7 @@ def load(Fcmn): # Load imaging datasets from caiman output to custom object
                 dff = np.vstack((dff, DFF))
                 pid = pid + 1
 
-            Condition.append({"Name":c, "Data":dff, "Coordinates":xyz})
+            Condition.append({"Name":c, "Data":dff, "Coordinates":xyz, "Pixels":pixco})
 
         Fish.append({"Name":f, "Cond":Condition, "Path":Fcmn, "xy_size":xy_size, "spacing":spacing})
 
@@ -249,6 +252,42 @@ def revreg(fish, zbb, F):
     
     return(zbb_t)
     
+#===============================================================================
+def pointtrans(Fish, F):
+#===============================================================================
+    import os
+    import ants
+    import pandas as pd
+    import numpy as np
+    
+    # Apply registration to the CMN identified cells
+    #---------------------------------------------------------------------------
+    for c in range(len(Fish["Cond"])):
+        print('Transforming points to standard space for condition ' + str(c+1))
+        Freg   = F["Freg"] + os.sep + Fish["Name"] + os.sep + Fish["Cond"][c]["Name"]
+        Ff2cf  = Freg + os.sep + 'FUN2CF'
+        os.listdir(Ff2cf)
+
+        cs = pd.DataFrame(Fish["Cond"][c]["Pixels"])
+        cs.columns = ['x', 'y', 'z'] 
+        tcs = np.multiply(cs, (-.3,.3,-6))
+
+        ncs = ants.apply_transforms_to_points(3, tcs, \
+                                       [ Ff2cf +os.sep+ 'cf2fun_R.mat', 
+                                         Ff2cf +os.sep+ 'cf2fun_S.mat', 
+                                         Ff2cf +os.sep+ 'cf2fun_S.nii.gz'],  \
+                                       whichtoinvert = [True, True, False])
+
+        tcs = np.multiply(ncs, (1,1,1))
+        nncs = ants.apply_transforms_to_points(3, tcs, \
+                                        [ F["Ftrans"] +os.sep+ 'ref2cf_R.mat', 
+                                          F["Ftrans"] +os.sep+ 'ref2cf_S.mat', 
+                                          F["Ftrans"] +os.sep+ 'ref2cf_S.nii.gz'], \
+                                        whichtoinvert = [True,True,False]) 
+        
+        Fish["Cond"][c]["ZBBCoord"] = nncs.values
+    
+    return Fish
     
 #===============================================================================
 def fishplot(img, overl = '', orient = 'axial', sliceno = 20, al = .5, col = 'magma'):
@@ -391,72 +430,195 @@ def atlasmap(Fish, F):
     import os 
     import ants
     import cde_net_functions as cn
-    
-    def atlasgen(frompath, topath, Fish, F):
-        atl = ants.image_read(frompath)
-        return cn.revreg(Fish, atl, F)
-    
-    for c in range(len(Fish["Cond"])):
-        print('Checking / Making atlases for ' + Fish["Cond"][c]["Name"])
-        
-        Flut = F["Freg"] +os.sep+ Fish["Name"] + os.sep + Fish["Cond"][c]["Name"] +os.sep+ 'LUTs'
-        if not os.path.exists(Flut): os.makedirs(Flut)
-
-        # Zbrain atlas
-        #---------------------------------------------------------------------------
-        to = Flut +os.sep+ 'Z-brain_Atlas.tif'
-        fr = F["Ftemps"] +os.sep+ 'z-brain.tif'
-        if not os.path.isfile(to): ants.image_write(atlasgen(fr, to, Fish, F), to)
-
-        # Pajevic atlas
-        #--------------------------------------------------------------------------
-        to = Flut +os.sep+ 'Pajevic.tif'
-        fr = F["Ftemps"] +os.sep+ 'pajevic1.tif'
-        if not os.path.isfile(to): ants.image_write(atlasgen(fr, to, Fish, F), to)
-
-#===============================================================================
-def atlasload(Fish, F):
-#===============================================================================
-    import os
-    import ants
-    import numpy as np
     import pandas as pd
+    import numpy as np
     
-    # Original (voxel count) coordinates - for look up tables
-    #------------------------------------------------------------------------------
-    for c in range(len(Fish["Cond"])):
-        rw = ants.image_read(F["Freg"] +os.sep+ Fish["Name"] +os.sep+ Fish["Cond"][c]["Name"] +os.sep+
-                            'Raw' +os.sep+ Fish["Cond"][c]["Name"] + '.tif')
-
-        # Set up dummy Ants image to check orientation
-        #------------------------------------------------------------------------------
-        sp  = Fish["spacing"]                       # spacing used for the current fish
-        dm  = Fish["xy_size"]                       # dimensions of current fish's xy plane (in pixels? Don't know...)
-        cs  = Fish["Cond"][c]["Coordinates"]        # coordinates of the point cloud derived from current fish
-        ocs = np.divide(cs, sp)                          # Derive original (voxel count) coordinates
-
-        Fish["Cond"][c]["OCoord"] = ocs
+    # Assign labels corresponding to structural connectivity in Kunst et al
+    #--------------------------------------------------------------------------
+    kunst = pd.read_csv(F['Ftemps'] +os.sep+ 'Kunst_regions.csv')
+    L = []
+    for ind,row in kunst.iterrows():
+        if not pd.isnull(row["Pajevic Code"]):
+            plist = [x.strip() for x in row["Pajevic Code"].split(',')]
+            for pl in plist:
+                L.append({'paj':int(pl), 'ku':row["Kunst abbr"]})
+                                
     
-    # Find voxel labels from look up tables previously produced
-    #------------------------------------------------------------------------------
     for c in range(len(Fish["Cond"])):
-        Flut = F["Freg"] +os.sep + Fish["Name"] + os.sep + Fish["Cond"][c]["Name"] +os.sep+'LUTs'
-        zbat = ants.image_read(Flut +os.sep+ 'Z-brain_Atlas.tif')
-        pajt = ants.image_read(Flut +os.sep+ 'Pajevic.tif')
-        ocs  = Fish["Cond"][c]["OCoord"]
+        print('Mapping cells from ' +Fish["Cond"][c]["Name"]+ ' to atlasses')
+        
+        # Zbrain atlas
+        #=========================================================================
+        atlas = ants.image_read(F["Ftemps"] +os.sep+ 'z-brain.tif')
+        sccs  = np.divide(Fish["Cond"][c]["ZBBCoord"], (.6,.6,2.)).astype('int')
+        atl   = atlas[sccs[:,0], sccs[:,1], sccs[:,2]]
+        zbrain = atl
+        
+        # Pajevic segmentation
+        #=========================================================================
+        atlas = ants.image_read(F["Ftemps"] +os.sep+ 'pajevic1.tif')
+        sccs  = np.divide(Fish["Cond"][c]["ZBBCoord"], (.6,.6,2.)).astype('int')
+        atl   = atlas[sccs[:,0], sccs[:,1], sccs[:,2]]
+        pajevic = atl
+        
+        # Make brain labels
+        #=========================================================================
+        brainmask = pajevic > 0
 
-        bm = np.array((0))
-        za = np.array((0))
-        pj = np.array((0))
-
-        for o in ocs:
-            pj = np.append(pj, pajt[int(o[0]), int(o[1]), int(o[2])])
-            za = np.append(za, zbat[int(o[0]), int(o[1]), int(o[2])])
-            bm = np.append(bm, pj[-1] > 0)
-
-        Fish["Cond"][c]["Features"] = pd.DataFrame({'Brain Mask':bm[1:], 'Z-brain':za[1:], 'Coexpression':pj[1:]})
+        # Map onto Kunst structural connectivity segmentation
+        #=========================================================================        
+        # Classify as left or right and change kunst labels accordingly
+        #-------------------------------------------------------------------------
+        icp = 92.5                  # measures in ZBB coordinates
+        slp = 0 
+        
+        cs = Fish["Cond"][c]["ZBBCoord"]
+        lr = np.zeros([cs.shape[0],1])
+        lr[cs[:,1] <= (cs[:,0] * slp + icp)] = 1    # 1 = Right 
+        side            = lr
+        
+        # Iterate over cells and assign relevant Kunst abbreviations
+        #--------------------------------------------------------------------------
+        kunstbycell = []
+        kunstid     = []
+        for k in range(pajevic.shape[0]):
+            paj  = pajevic[k]
+            kuli = list(filter(lambda l: l['paj'] == paj, L))
+            if len(kuli)>0: 
+                thisku = kuli[0]["ku"]
+                if side[k] == 1: thisku = str.upper(thisku[0]) + thisku[1:]
+                kunstbycell.append(thisku)
+                kunstid.append(np.where(kunst["Kunst abbr"] == thisku)[0][0])
+            else:
+                kunstbycell.append(np.nan)
+                kunstid.append(0)
+        
+        # Pack it all up in a Cell-label array
+        #=========================================================================
+        Fish["Cond"][c]["Cell_labs"] = {'Zbrain':zbrain,
+                                        'Pajevic':pajevic,
+                                        'Brainmask':brainmask,
+                                        'Side':side,
+                                        'Kunst':kunstbycell,
+                                        'KunstID':np.array(kunstid)}
         
     return Fish
+        
+# #===============================================================================
+# def atlasload(Fish, F):
+# #===============================================================================
+#     import os
+#     import ants
+#     import numpy as np
+#     import pandas as pd
+#     import warnings
+    
+#     # Original (voxel count) coordinates - for look up tables
+#     #------------------------------------------------------------------------------
+#     for c in range(len(Fish["Cond"])):
+#         rw = ants.image_read(F["Freg"] +os.sep+ Fish["Name"] +os.sep+ Fish["Cond"][c]["Name"] +os.sep+
+#                             'Raw' +os.sep+ Fish["Cond"][c]["Name"] + '.tif')
+
+#         # Set up dummy Ants image to check orientation
+#         #------------------------------------------------------------------------------
+#         sp  = Fish["spacing"]                       # spacing used for the current fish
+#         dm  = Fish["xy_size"]                       # dimensions of current fish's xy plane (in pixels? Don't know...)
+#         cs  = Fish["Cond"][c]["Coordinates"]        # coordinates of the point cloud derived from current fish
+#         ocs = np.divide(cs, sp)                          # Derive original (voxel count) coordinates
+
+#         Fish["Cond"][c]["OCoord"] = ocs
+    
+#     # Find voxel labels from look up tables previously produced
+#     #------------------------------------------------------------------------------
+#     for c in range(len(Fish["Cond"])):
+#         Flut = F["Freg"] +os.sep + Fish["Name"] + os.sep + Fish["Cond"][c]["Name"] +os.sep+'LUTs'
+#         zbat = ants.image_read(Flut +os.sep+ 'Z-brain_Atlas.tif')
+#         pajt = ants.image_read(Flut +os.sep+ 'Pajevic.tif')
+#         ocs  = Fish["Cond"][c]["OCoord"]
+
+#         bm = np.array((0))
+#         za = np.array((0))
+#         pj = np.array((0))
+
+#         for o in ocs:
+#             pj = np.append(pj, pajt[int(o[0]), int(o[1]), int(o[2])])
+#             za = np.append(za, zbat[int(o[0]), int(o[1]), int(o[2])])
+#             bm = np.append(bm, pj[-1] > 0)
+
+#         Fish["Cond"][c]["Features"] = pd.DataFrame({'Brain Mask':bm[1:], 'Z-brain':za[1:], 'Coexpression':pj[1:]})
+        
+#     # Assign labels corresponding to structural connectivity in Kunst et al
+#     #--------------------------------------------------------------------------
+#     kunst = pd.read_csv(F['Ftemps'] +os.sep+ 'Kunst_regions.csv')
+
+#     L = []
+#     for ind,row in kunst.iterrows():
+#         if not pd.isnull(row["Pakevic Code"]):
+#             plist = [x.strip() for x in row["Pakevic Code"].split(',')]
+#             for pl in plist:
+#                 L.append({'paj':int(pl), 'ku':row["Kunst abbr"]})
+
+
+#     # Classify as left or right and change kunst labels accordingly
+#     #-------------------------------------------------------------------------
+#     icp = [141, 140];          # <- This is completely idiosynchratic to fish and condition
+#     slp = [0.0714, 0.0344];    # <- Richard fix this before moving on to more fish! 
+#     warnings.warn('Oi, the left-right segmentation works for one fish and one fish only, fix it')
+#     for c in range(len(Fish["Cond"])):
+#         cs = Fish["Cond"][c]["Pixels"]
+#         lr = np.zeros([cs.shape[0],1])
+#         lr[ cs[:,1] <= (cs[:,0] * slp[c] + icp[c])] = 1
+#         Fish["Cond"][c]["Features"]["Side"]    = lr
+
+#     # Iterate over cells and assign relevant Kunst abbreviations
+#     #--------------------------------------------------------------------------
+#     for c in range(len(Fish["Cond"])):
+#         feat = Fish["Cond"][c]["Features"]
+#         kunstbycell = []
+#         kunstid     = []
+#         for f, fr in feat.iterrows():
+#             pak  = np.round(fr["Coexpression"])
+#             kuli = list(filter(lambda l: l['paj'] == pak, L))
+#             if len(kuli)>0: 
+#                 thisku = kuli[0]["ku"]
+#                 if fr["Side"] == 1: thisku = str.upper(thisku[0]) + thisku[1:]
+#                 kunstbycell.append(thisku)
+#                 kunstid.append(np.where(kunst["Kunst abbr"] == thisku)[0][0])
+#             else:
+#                 kunstbycell.append(np.nan)
+#                 kunstid.append(0)
+
+#         Fish["Cond"][c]["Features"]["Kunst"] = kunstbycell
+#         Fish["Cond"][c]["Features"]["KunstID"] = kunstid
+
+#         return Fish        
+        
+        
+        
+#     def atlasgen(frompath, topath, Fish, F):
+#         atl = ants.image_read(frompath)
+#         return cn.revreg(Fish, atl, F)
+    
+#     for c in range(len(Fish["Cond"])):
+#         print('Checking / Making atlases for ' + Fish["Cond"][c]["Name"])
+        
+#         Flut = F["Freg"] +os.sep+ Fish["Name"] + os.sep + Fish["Cond"][c]["Name"] +os.sep+ 'LUTs'
+#         if not os.path.exists(Flut): os.makedirs(Flut)
+
+#         # Zbrain atlas
+#         #---------------------------------------------------------------------------
+#         to = Flut +os.sep+ 'Z-brain_Atlas.tif'
+#         fr = F["Ftemps"] +os.sep+ 'z-brain.tif'
+#         if not os.path.isfile(to): ants.image_write(atlasgen(fr, to, Fish, F), to)
+
+#         # Pajevic atlas
+#         #--------------------------------------------------------------------------
+#         to = Flut +os.sep+ 'Pajevic.tif'
+#         fr = F["Ftemps"] +os.sep+ 'pajevic1.tif'
+#         if not os.path.isfile(to): ants.image_write(atlasgen(fr, to, Fish, F), to)
+            
+#         # Kunst labels
+#         #--------------------------------------------------------------------------
 
 #===============================================================================
 def fishdot(fish, cols, ax = None, cmap = 'Spectral_r', al = 1):

@@ -32,7 +32,7 @@ def fishspec(Fdata, prefx = ''):
     return Zfish
 
 #===============================================================================
-def meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False doplot = True):
+def meancalc(imgs, Fimg, noimages = 100, delfirst = True, crop = False, doplot = True):
 #===============================================================================
     import numpy as np
     import ants
