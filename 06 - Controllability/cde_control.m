@@ -1,9 +1,9 @@
-housekeep   = 0;    % Run housekeeping section
-fishload    = 0;    % Load fish data
-datasegm    = 0;    % segment/collate data according to relevant atlas
+housekeep   = 1;    % Run housekeeping section
+fishload    = 1;    % Load fish data
+datasegm    = 1;    % segment/collate data according to relevant atlas
 winslide    = 0;    % run sliding window functional connectivity estimation
-moremats    = 0;    % run 
-regressm    = 1;
+moremats    = 1;    % run 
+regressm    = 0;
 
 % Housekeeping
 %==========================================================================
@@ -117,8 +117,9 @@ if moremats
 clear Bl
 bas     = Fish(1).Cond{1}.Data; 
 bpaj    = Fish(1).Cond{1}.Cell_labs.Pajevic; 
+bsid     = Fish(1).Cond{1}.Cell_labs.Side;
 for n = 1:length(Nd)
-    bi = find(bpaj == Nd(n).p);
+    bi = intersect(find(bpaj == Nd(n).p), find(bsid == Nd(n).s));
     Bl(n).d = mean(bas(bi,:),1); 
 end
 
@@ -164,7 +165,7 @@ clear pajid
 for p = 1:size(pajcode,1)-1,  pajid(p) = str2double(pajcode{p+1});  end
 gross = unique(pajcode(2:end, 3)); 
 
-% Label nodes my gross anatomical region
+% Label nodes by gross anatomical region
 %--------------------------------------------------------------------------
 for n = 1:length(Nd)
     id          = find(pajid == Nd(n).p); 
